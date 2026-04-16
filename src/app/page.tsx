@@ -7,6 +7,10 @@ import PRODUCTS from "@/config/products";
 
 type Phase = "home" | "loading" | "result";
 
+const AI_BASE_URL = process.env.NEXT_PUBLIC_NEWAPI_BASE_URL ?? "https://new-api.300624.cn";
+const AI_MODEL = process.env.NEXT_PUBLIC_MODEL_USED ?? "gpt-5.4";
+const LS_KEY = "ph_radar_api_key";
+
 const PROGRESS_STEPS = [
   "正在连接 Product Hunt RSS…",
   "读取最新产品动态…",
@@ -25,6 +29,15 @@ export default function Home() {
   const [phContext, setPhContext] = useState<string>("");
   const [progressStep, setProgressStep] = useState(0);
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [apiKey, setApiKey] = useState<string>("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const pendingProductRef = useRef<(typeof PRODUCTS)[0] | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) setApiKey(saved);
+  }, []);
 
   useEffect(() => {
     if (phase === "loading") {
@@ -40,7 +53,7 @@ export default function Home() {
     };
   }, [phase]);
 
-  const handleCardClick = async (product: (typeof PRODUCTS)[0]) => {
+  const runAnalysis = async (product: (typeof PRODUCTS)[0], key: string) => {
     setActiveProduct(product);
     setPhase("loading");
     setError("");
@@ -48,24 +61,87 @@ export default function Home() {
     setPhContext("");
 
     try {
-      const response = await fetch("/api/analyze", {
+      const prepRes = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ productId: product.id }),
       });
+      if (!prepRes.ok) {
+        const e = await prepRes.json();
+        throw new Error(e.error || "数据准备失败");
+      }
+      const { messages, modelName, phContext: ctx } = await prepRes.json();
+      if (ctx) setPhContext(ctx);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "分析失败");
+      const model = modelName || AI_MODEL;
+      const aiRes = await fetch(`${AI_BASE_URL}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({ model, stream: true, messages }),
+      });
+
+      if (!aiRes.ok) {
+        const errText = await aiRes.text();
+        throw new Error(`AI 请求失败 (HTTP ${aiRes.status}): ${errText.slice(0, 200)}`);
       }
 
-      const result = await response.json();
-      setAnalysis(result.analysis);
-      if (typeof result.phContext === "string") setPhContext(result.phContext);
+      const reader = aiRes.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let fullText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") continue;
+          try {
+            const chunk = JSON.parse(data);
+            const delta = chunk.choices?.[0]?.delta;
+            const piece = delta?.content || delta?.reasoning_content || "";
+            if (piece) fullText += piece;
+          } catch { /* ignore */ }
+        }
+      }
+
+      if (!fullText.trim()) throw new Error("AI 返回了空响应");
+      setAnalysis(fullText.trim());
       setPhase("result");
     } catch (err) {
       setError(err instanceof Error ? err.message : "发生未知错误");
       setPhase("result");
+    }
+  };
+
+  const handleCardClick = (product: (typeof PRODUCTS)[0]) => {
+    const key = apiKey || localStorage.getItem(LS_KEY) || "";
+    if (!key) {
+      pendingProductRef.current = product;
+      setKeyInput("");
+      setShowKeyModal(true);
+      return;
+    }
+    runAnalysis(product, key);
+  };
+
+  const handleKeyConfirm = () => {
+    const trimmed = keyInput.trim();
+    if (!trimmed) return;
+    localStorage.setItem(LS_KEY, trimmed);
+    setApiKey(trimmed);
+    setShowKeyModal(false);
+    if (pendingProductRef.current) {
+      runAnalysis(pendingProductRef.current, trimmed);
+      pendingProductRef.current = null;
     }
   };
 
@@ -118,6 +194,44 @@ export default function Home() {
   return (
     <ShaderBackground active={phase === "loading"}>
       <main className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6 py-14">
+
+        {/* ── API Key Modal ── */}
+        {showKeyModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-6"
+            style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}>
+            <div className="w-full max-w-sm rounded-3xl p-6"
+              style={{ background: "rgba(18,18,22,0.95)", border: "1px solid rgba(255,255,255,0.1)" }}>
+              <h3 className="text-white/90 text-[16px] font-medium mb-1">输入你的 API Key</h3>
+              <p className="text-white/40 text-xs mb-5 leading-relaxed">
+                Key 仅保存在你的浏览器本地（localStorage），不会上传到服务器。<br />
+                AI 请求将从你的网络直接发出。
+              </p>
+              <input
+                type="password"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleKeyConfirm()}
+                placeholder="sk-..."
+                autoFocus
+                className="w-full rounded-xl px-4 py-3 text-sm text-white/85 outline-none mb-4"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}
+              />
+              <div className="flex gap-2">
+                <button onClick={handleKeyConfirm}
+                  disabled={!keyInput.trim()}
+                  className="flex-1 rounded-xl py-2.5 text-sm font-medium transition-opacity disabled:opacity-30"
+                  style={{ background: "rgba(124,176,253,0.2)", color: "rgba(124,176,253,0.9)", border: "1px solid rgba(124,176,253,0.25)" }}>
+                  确认并开始
+                </button>
+                <button onClick={() => setShowKeyModal(false)}
+                  className="rounded-xl px-4 py-2.5 text-sm text-white/40 hover:text-white/60 transition-colors"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  取消
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Home: product cards ── */}
         <div
@@ -203,6 +317,17 @@ export default function Home() {
                 </div>
               </button>
             ))}
+          </div>
+
+          {/* ── Key management footer ── */}
+          <div className="mt-8 text-center">
+            <button
+              onClick={() => { setKeyInput(""); setShowKeyModal(true); }}
+              className="text-[11px] transition-colors hover:text-white/35"
+              style={{ color: apiKey ? "rgba(255,255,255,0.18)" : "rgba(255,150,150,0.45)" }}
+            >
+              {apiKey ? "🔑 已设置 API Key · 点击修改" : "⚠️ 尚未设置 API Key"}
+            </button>
           </div>
         </div>
 

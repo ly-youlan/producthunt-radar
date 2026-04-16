@@ -4,8 +4,6 @@ import products from "@/config/products";
 
 export const runtime = "nodejs";
 
-const newApiKeyRaw = process.env.NEWAPI_KEY;
-const newApiKey = newApiKeyRaw?.trim();
 const modelName = (process.env.MODEL_USED || "gpt-4o").trim();
 const tavilyKey = process.env.TAVILY_KEY?.trim();
 const parser = new Parser();
@@ -210,16 +208,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!newApiKey) {
-      return NextResponse.json(
-        {
-          error:
-            "Missing NEWAPI_KEY. Check your .env.local and restart dev server. Tip: avoid spaces around '='.",
-        },
-        { status: 500 }
-      );
-    }
-
     const cfg = products.find((p) => p.id === productId);
     const searchTerm = cfg?.searchQuery ?? productName;
 
@@ -281,107 +269,21 @@ ${tavilyData}
 - 每个重点新品的 tag 必须是对该产品类型的具体概括，不能写"未知"
 `;
 
-    const dsResponse = await fetch("https://new-api.300624.cn/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${newApiKey}`,
-      },
-      body: JSON.stringify({
-        model: modelName,
-        stream: true,
-        messages: [
-          { role: "system", content: "You are a helpful assistant." },
-          { role: "user", content: prompt },
-        ],
-      }),
-    });
-
-    if (!dsResponse.ok) {
-      const errText = await dsResponse.text();
-      console.error(`[NewAPI] HTTP ${dsResponse.status}:`, errText);
-      return NextResponse.json(
-        {
-          error: `NewAPI request failed (HTTP ${dsResponse.status})`,
-          details: errText,
-        },
-        { status: 502 }
-      );
-    }
-
-    if (!dsResponse.body) {
-      return NextResponse.json({ error: "NewAPI returned empty stream" }, { status: 502 });
-    }
-
-    const reader = dsResponse.body.getReader();
-    const decoder = new TextDecoder();
-    let contentParts: string[] = [];
-    let reasoningParts: string[] = [];
-    let buf = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const data = trimmed.slice(5).trim();
-        if (data === "[DONE]") continue;
-        try {
-          const chunk = JSON.parse(data) as {
-            choices?: {
-              delta?: { content?: string | null; reasoning_content?: string | null };
-            }[];
-          };
-          const delta = chunk.choices?.[0]?.delta;
-          if (delta?.content) contentParts.push(delta.content);
-          if (delta?.reasoning_content) reasoningParts.push(delta.reasoning_content);
-        } catch {
-          // ignore malformed SSE chunk
-        }
-      }
-    }
-
-    const text = (contentParts.join("") || reasoningParts.join("")).trim();
-    if (!text) {
-      console.error("[NewAPI] Stream produced no content. content chunks:", contentParts.length, "reasoning chunks:", reasoningParts.length);
-      return NextResponse.json(
-        { error: "NewAPI returned empty response" },
-        { status: 502 }
-      );
-    }
-
     return NextResponse.json({
       success: true,
-      analysis: text,
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: prompt },
+      ],
+      modelName,
+      productLabel,
       phContext: productHuntData,
-      productName,
     });
   } catch (error) {
-    console.error("AI API Error:", error);
-
+    console.error("Prepare Error:", error);
     const message = error instanceof Error ? error.message : String(error);
-
-    if (
-      message.toLowerCase().includes("fetch failed") ||
-      message.toLowerCase().includes("getaddrinfo") ||
-      message.toLowerCase().includes("econn")
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Network error calling AI provider. Check your network/proxy settings.",
-          details: message,
-        },
-        { status: 502 }
-      );
-    }
-
     return NextResponse.json(
-      { error: "Failed to generate analysis", details: message },
+      { error: "Failed to prepare analysis data", details: message },
       { status: 500 }
     );
   }
