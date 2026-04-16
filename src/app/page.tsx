@@ -1,20 +1,48 @@
 "use client";
 
-import { useState } from "react";
-import InputForm from "@/components/InputForm";
+import { useState, useEffect, useRef } from "react";
 import Report from "@/components/Report";
 import ShaderBackground from "@/components/ShaderBackground";
+import PRODUCTS from "@/config/products";
+
+type Phase = "home" | "loading" | "result";
+
+const PROGRESS_STEPS = [
+  "正在连接 Product Hunt RSS…",
+  "读取最新产品动态…",
+  "Tavily 实时搜索相关页面…",
+  "匹配行业关键词与竞品信息…",
+  "正在生成洞察报告…",
+  "整理关键发现…",
+  "报告即将完成…",
+];
 
 export default function Home() {
-  const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<Phase>("home");
   const [analysis, setAnalysis] = useState("");
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
+  const [activeProduct, setActiveProduct] = useState<(typeof PRODUCTS)[0] | null>(null);
   const [phContext, setPhContext] = useState<string>("");
+  const [progressStep, setProgressStep] = useState(0);
+  const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const handleAnalyze = async (productName: string) => {
-    setQuery(productName);
-    setLoading(true);
+  useEffect(() => {
+    if (phase === "loading") {
+      setProgressStep(0);
+      progressRef.current = setInterval(() => {
+        setProgressStep((s) => Math.min(s + 1, PROGRESS_STEPS.length - 1));
+      }, 3500);
+    } else {
+      if (progressRef.current) clearInterval(progressRef.current);
+    }
+    return () => {
+      if (progressRef.current) clearInterval(progressRef.current);
+    };
+  }, [phase]);
+
+  const handleCardClick = async (product: (typeof PRODUCTS)[0]) => {
+    setActiveProduct(product);
+    setPhase("loading");
     setError("");
     setAnalysis("");
     setPhContext("");
@@ -22,10 +50,8 @@ export default function Home() {
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ productName }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId: product.id }),
       });
 
       if (!response.ok) {
@@ -36,121 +62,234 @@ export default function Home() {
       const result = await response.json();
       setAnalysis(result.analysis);
       if (typeof result.phContext === "string") setPhContext(result.phContext);
+      setPhase("result");
     } catch (err) {
       setError(err instanceof Error ? err.message : "发生未知错误");
-    } finally {
-      setLoading(false);
+      setPhase("result");
     }
   };
 
   const reset = () => {
-    setLoading(false);
+    setPhase("home");
     setError("");
     setAnalysis("");
     setPhContext("");
-    setQuery("");
+    setActiveProduct(null);
   };
 
-  const hasResult = !!analysis;
-
-  let readingTitles: string[] = [];
-  try {
-    const parsed = phContext ? JSON.parse(phContext) : null;
-    const items = parsed?.items;
-    if (Array.isArray(items)) {
-      readingTitles = items
-        .map((it: any) => (typeof it?.title === "string" ? it.title : null))
-        .filter(Boolean)
-        .slice(0, 6);
-    }
-  } catch {
-    // ignore
-  }
-
   return (
-    <ShaderBackground active={loading}>
+    <ShaderBackground active={phase === "loading"}>
       <main className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6 py-14">
-        <div className="w-full max-w-2xl">
-          <div
-            className={`transition-all duration-500 ease-out ${
-              loading || hasResult
-                ? "opacity-0 -translate-y-2 scale-[0.99] pointer-events-none"
-                : "opacity-100 translate-y-0 scale-100"
-            }`}
-          >
-            <h1 className="text-[28px] font-semibold tracking-tight text-white/90">
+
+        {/* ── Home: product cards ── */}
+        <div
+          className={`w-full max-w-3xl transition-all duration-500 ease-out ${
+            phase === "home"
+              ? "opacity-100 translate-y-0 scale-100"
+              : "opacity-0 -translate-y-4 scale-[0.98] pointer-events-none absolute"
+          }`}
+        >
+          <div className="text-center mb-12">
+            <p className="text-[11px] tracking-[0.25em] uppercase text-white/30 mb-3">
               PM Radar
+            </p>
+            <h1 className="text-[32px] font-light tracking-tight text-white/85">
+              选择产品，开始调研
             </h1>
-            <div className="mt-6 rounded-2xl border border-[color:rgba(200,149,108,0.35)] bg-[rgba(10,10,10,0.55)] backdrop-blur-md shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_60px_rgba(0,0,0,0.55)]">
-              <div className="p-5">
-                <InputForm onAnalyze={handleAnalyze} loading={loading} />
-              </div>
-            </div>
           </div>
 
-          <div
-            className={`mt-10 text-center transition-all duration-700 ease-out ${
-              loading
-                ? "opacity-100 translate-y-0"
-                : analysis
-                  ? "opacity-0 -translate-y-6 pointer-events-none"
-                  : "opacity-0 translate-y-2 pointer-events-none"
-            }`}
-          >
-            <div className="text-xs tracking-wider text-white/40">Reading</div>
-            <div className="mt-2 text-[22px] font-semibold tracking-tight text-[rgba(200,149,108,0.95)]">
-              {query}
-            </div>
-
-            <div className="mx-auto mt-5 w-full max-w-xl rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left">
-              <div className="text-[11px] uppercase tracking-wider text-white/40">
-                Product Hunt feed
-              </div>
-              <div className="mt-2 space-y-1.5">
-                {readingTitles.length > 0 ? (
-                  readingTitles.map((t, idx) => (
-                    <div
-                      key={idx}
-                      className="truncate text-sm text-white/75"
-                      title={t}
-                    >
-                      {t}
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-white/55">
-                    Fetching latest items…
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {PRODUCTS.map((product) => (
+              <button
+                key={product.id}
+                onClick={() => handleCardClick(product)}
+                className="group text-left rounded-3xl p-6 cursor-pointer transition-all duration-300 hover:scale-[1.025] hover:-translate-y-1 active:scale-[0.98]"
+                style={{
+                  background: `linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.03) 100%)`,
+                  border: `1px solid ${product.borderColor}`,
+                  backdropFilter: "blur(20px)",
+                  WebkitBackdropFilter: "blur(20px)",
+                  boxShadow: `0 4px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08)`,
+                }}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div
+                    className="rounded-xl px-2.5 py-1 text-[10px] tracking-widest uppercase font-medium"
+                    style={{
+                      background: product.accentColor,
+                      color: product.tagColor,
+                      border: `1px solid ${product.borderColor}`,
+                    }}
+                  >
+                    调研
                   </div>
-                )}
-              </div>
-              <div className="mt-3 h-px w-full bg-white/10" />
-              <div className="mt-3 flex items-center justify-between">
-                <div className="text-xs text-white/45">Generating report…</div>
-                <div className="h-1.5 w-1.5 rounded-full bg-[rgba(200,149,108,0.95)] shadow-[0_0_18px_rgba(200,149,108,0.45)]" />
-              </div>
-            </div>
+                  <div
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-xs"
+                    style={{ color: product.tagColor }}
+                  >
+                    点击开始 →
+                  </div>
+                </div>
+
+                <h2 className="text-[22px] font-medium tracking-tight text-white/90 mb-1">
+                  {product.name}
+                </h2>
+                <p
+                  className="text-[12px] tracking-wider mb-4"
+                  style={{ color: product.tagColor }}
+                >
+                  {product.tagline}
+                </p>
+                <p className="text-sm text-white/50 mb-5 leading-relaxed">
+                  {product.description}
+                </p>
+
+                <div className="border-t border-white/[0.06] pt-4">
+                  <p className="text-[10px] uppercase tracking-widest text-white/25 mb-2">
+                    竞品参考
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {product.watchCompetitors.map((c) => (
+                      <span
+                        key={c}
+                        className="rounded-full px-2.5 py-0.5 text-[11px] text-white/55"
+                        style={{
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
         </div>
 
-        {error && (
-          <div className="mt-5 w-full max-w-2xl rounded-xl border border-[rgba(255,120,120,0.35)] bg-[rgba(40,10,10,0.35)] px-4 py-3 text-sm text-[rgba(255,200,200,0.9)]">
-            {error}
-          </div>
-        )}
-
-        {analysis && (
-          <div className="w-full max-w-4xl transition-all duration-700 ease-out opacity-100 translate-y-0">
-            <div className="mb-4 flex justify-end">
-              <button
-                onClick={reset}
-                className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/65 hover:bg-white/[0.05]"
+        {/* ── Loading: digital rain overlay ── */}
+        <div
+          className={`text-center transition-all duration-500 ease-out ${
+            phase === "loading"
+              ? "opacity-100 translate-y-0"
+              : "opacity-0 pointer-events-none absolute"
+          }`}
+        >
+          {activeProduct && (
+            <>
+              <p className="text-[10px] tracking-[0.3em] uppercase text-white/30 mb-3">
+                Scanning
+              </p>
+              <p
+                className="text-[28px] font-light tracking-tight mb-8"
+                style={{ color: activeProduct.tagColor }}
               >
-                New search
-              </button>
-            </div>
-            <Report analysis={analysis} />
-          </div>
-        )}
+                {activeProduct.name}
+              </p>
+              <div
+                className="mx-auto rounded-2xl px-6 py-5 max-w-xs text-left"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  backdropFilter: "blur(12px)",
+                }}
+              >
+                <p className="text-[10px] uppercase tracking-widest text-white/25 mb-4">
+                  后台进度
+                </p>
+                <div className="space-y-2.5">
+                  {PROGRESS_STEPS.map((step, i) => {
+                    const done = i < progressStep;
+                    const active = i === progressStep;
+                    return (
+                      <div key={i} className="flex items-center gap-2.5">
+                        <span
+                          className="shrink-0 h-1.5 w-1.5 rounded-full transition-all duration-500"
+                          style={{
+                            background: done
+                              ? activeProduct.tagColor
+                              : active
+                              ? activeProduct.tagColor
+                              : "rgba(255,255,255,0.15)",
+                            opacity: done ? 0.6 : active ? 1 : 0.3,
+                            boxShadow: active
+                              ? `0 0 8px ${activeProduct.tagColor}`
+                              : "none",
+                          }}
+                        />
+                        <p
+                          className="text-sm transition-all duration-500 truncate"
+                          style={{
+                            color: active
+                              ? "rgba(255,255,255,0.85)"
+                              : done
+                              ? "rgba(255,255,255,0.35)"
+                              : "rgba(255,255,255,0.2)",
+                          }}
+                        >
+                          {step}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── Result: poster ── */}
+        <div
+          className={`w-full max-w-4xl transition-all duration-700 ease-out ${
+            phase === "result"
+              ? "opacity-100 translate-y-0"
+              : "opacity-0 translate-y-6 pointer-events-none absolute"
+          }`}
+        >
+          {phase === "result" && (
+            <>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  {activeProduct && (
+                    <span
+                      className="text-sm font-medium"
+                      style={{ color: activeProduct.tagColor }}
+                    >
+                      {activeProduct.name}
+                    </span>
+                  )}
+                  <span className="text-white/25 text-xs">· 行业雷达报告</span>
+                </div>
+                <button
+                  onClick={reset}
+                  className="rounded-full px-4 py-1.5 text-xs text-white/50 hover:text-white/75 transition-colors"
+                  style={{
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  ← 返回
+                </button>
+              </div>
+
+              {error ? (
+                <div
+                  className="rounded-2xl px-5 py-4 text-sm"
+                  style={{
+                    background: "rgba(255,80,80,0.08)",
+                    border: "1px solid rgba(255,100,100,0.2)",
+                    color: "rgba(255,180,180,0.9)",
+                  }}
+                >
+                  {error}
+                </div>
+              ) : (
+                <Report analysis={analysis} />
+              )}
+            </>
+          )}
+        </div>
       </main>
     </ShaderBackground>
   );

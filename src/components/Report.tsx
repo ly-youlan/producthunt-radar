@@ -53,9 +53,12 @@ function extractBullets(block: string) {
 }
 
 type ProductItem = {
-  nameLine: string;
+  name: string;
+  link?: string;
+  tag?: string;
   line2?: string;
   line3?: string;
+  line4?: string;
 };
 
 function extractProducts(block: string): ProductItem[] {
@@ -64,10 +67,25 @@ function extractProducts(block: string): ProductItem[] {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i].trim();
     if (!l.startsWith("- ")) continue;
-    const nameLine = l.replace(/^[-*]\s+/, "").trim();
+    const raw = l.replace(/^[-*]\s+/, "").trim();
+    // Parse: **名称** ｜ 🏷️ [tag] ｜ [link] or **名称** ｜ [link]
+    // Remove markdown bold
+    const deBolded = raw.replace(/\*\*/g, "");
+    const parts = deBolded.split(/[｜|]/).map((s) => s.trim());
+    const name = parts[0] ?? deBolded;
+    let tag: string | undefined;
+    let link: string | undefined;
+    for (const part of parts.slice(1)) {
+      const mdLink = part.match(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/);
+      if (mdLink) { link = mdLink[2]; continue; }
+      if (part.startsWith("http")) { link = part; continue; }
+      if (part === "(无链接)" || part === "无链接") continue;
+      if (part && !tag) tag = part.replace(/^🏷️\s*/, "").replace(/^\[|\]$/g, "").trim();
+    }
     const line2 = lines[i + 1]?.trim();
     const line3 = lines[i + 2]?.trim();
-    items.push({ nameLine, line2, line3 });
+    const line4 = lines[i + 3]?.trim();
+    items.push({ name, link, tag, line2, line3, line4 });
   }
   return items.slice(0, 10);
 }
@@ -86,31 +104,28 @@ export default function Report({ analysis }: ReportProps) {
     );
   }
 
-  const keySection =
-    parsed.sections["💡 本周关键发现"] ||
-    parsed.sections["本周关键发现"] ||
-    parsed.sections["关键发现"] ||
-    "";
-  const productsSection =
-    parsed.sections["🆕 重点新品"] ||
-    parsed.sections["重点新品"] ||
-    parsed.sections["新品"] ||
-    "";
-  const bigCoSection =
-    parsed.sections["🔄 大厂动态速览"] || parsed.sections["大厂动态速览"] || "";
-  const demoSection =
-    parsed.sections["🎬 DemoCreate 专项"] ||
-    parsed.sections["DemoCreate 专项"] ||
-    parsed.sections["工具链专项"] ||
-    "";
-  const categorySection =
-    parsed.sections["📊 分类速览"] || parsed.sections["分类速览"] || "";
-  const ideasSection =
-    parsed.sections["💎 随手记灵感"] || parsed.sections["随手记灵感"] || "";
+  const keySection = Object.entries(parsed.sections).find(([k]) =>
+    k.includes("关键发现")
+  )?.[1] ?? "";
+  const productsSection = Object.entries(parsed.sections).find(([k]) =>
+    k.includes("重点新品")
+  )?.[1] ?? "";
+  const bigCoSection = Object.entries(parsed.sections).find(([k]) =>
+    k.includes("大厂动态")
+  )?.[1] ?? "";
+  const watchSection = Object.entries(parsed.sections).find(([k]) =>
+    k.includes("特别关注")
+  )?.[1] ?? "";
+  const ideasSection = Object.entries(parsed.sections).find(([k]) =>
+    k.includes("随手记")
+  )?.[1] ?? "";
 
   const findings = extractBullets(keySection).slice(0, 6);
-  const products = extractProducts(productsSection);
+  const productItems = extractProducts(productsSection);
   const ideas = extractBullets(ideasSection).slice(0, 12);
+
+  const bigCoEmpty = !bigCoSection || /无重大|无相关|暂无/.test(bigCoSection);
+  const watchEmpty = !watchSection || /无相关|暂无|未出现|建议手动/.test(watchSection);
 
   return (
     <div className="mt-8 w-full max-w-4xl">
@@ -160,28 +175,44 @@ export default function Report({ analysis }: ReportProps) {
               🆕 重点新品
             </div>
             <div className="grid gap-3">
-              {products.length > 0 ? (
-                products.map((p, idx) => (
+              {productItems.length > 0 ? (
+                productItems.map((p, idx) => (
                   <div
                     key={idx}
-                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                    className="relative rounded-2xl border border-white/10 bg-white/[0.03] p-4"
                   >
-                    <div className="text-[15px] font-semibold text-white/90">
-                      <div className="prose prose-invert max-w-none text-white/90 prose-p:my-0">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.nameLine}</ReactMarkdown>
-                      </div>
+                    {p.tag && (
+                      <span className="absolute top-3 right-3 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide"
+                        style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.1)" }}
+                      >
+                        {p.tag}
+                      </span>
+                    )}
+                    <div className="text-[15px] font-semibold text-white/90 pr-20">
+                      {p.link ? (
+                        <a href={p.link} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
+                          {p.name}
+                        </a>
+                      ) : p.name}
                     </div>
                     {p.line2 && (
-                      <div className="mt-2 text-sm text-white/70 leading-relaxed">
-                        <div className="prose prose-invert max-w-none text-white/70 prose-p:my-0">
+                      <div className="mt-2 text-sm text-white/60 leading-relaxed">
+                        <div className="prose prose-invert max-w-none text-white/60 prose-p:my-0">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.line2}</ReactMarkdown>
                         </div>
                       </div>
                     )}
                     {p.line3 && (
-                      <div className="mt-2 text-sm text-[rgba(200,149,108,0.95)] leading-relaxed">
-                        <div className="prose prose-invert max-w-none text-[rgba(200,149,108,0.95)] prose-p:my-0">
+                      <div className="mt-1.5 text-sm text-white/70 leading-relaxed">
+                        <div className="prose prose-invert max-w-none text-white/70 prose-p:my-0">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.line3}</ReactMarkdown>
+                        </div>
+                      </div>
+                    )}
+                    {p.line4 && (
+                      <div className="mt-1.5 text-sm text-[rgba(200,149,108,0.9)] leading-relaxed">
+                        <div className="prose prose-invert max-w-none prose-p:my-0" style={{color:"rgba(200,149,108,0.9)"}}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.line4}</ReactMarkdown>
                         </div>
                       </div>
                     )}
@@ -195,45 +226,31 @@ export default function Report({ analysis }: ReportProps) {
             </div>
           </section>
 
-          <section className="grid gap-4 md:grid-cols-2">
-            <div>
+          {!bigCoEmpty && (
+            <section>
               <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
-                🔄 大厂动态速览
+                � 大厂动态
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 whitespace-pre-wrap leading-relaxed">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 leading-relaxed">
                 <div className="prose prose-invert max-w-none text-white/70 prose-p:my-0">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {bigCoSection || "本周无重大大厂动态"}
-                  </ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{bigCoSection}</ReactMarkdown>
                 </div>
               </div>
-            </div>
-            <div>
-              <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
-                📊 分类速览
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 whitespace-pre-wrap leading-relaxed">
-                <div className="prose prose-invert max-w-none text-white/70 prose-p:my-0">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {categorySection || "无重大新动态"}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            </div>
-          </section>
+            </section>
+          )}
 
-          <section>
-            <div className="mb-3 text-xs font-semibold tracking-wider text-[rgba(200,149,108,0.85)]">
-              🎬 DemoCreate 专项
-            </div>
-            <div className="rounded-2xl border border-[rgba(200,149,108,0.25)] bg-[rgba(200,149,108,0.06)] p-4 text-sm text-white/75 whitespace-pre-wrap leading-relaxed">
-              <div className="prose prose-invert max-w-none text-white/75 prose-p:my-0">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {demoSection || "本周无直接相关信息。"}
-                </ReactMarkdown>
+          {!watchEmpty && (
+            <section>
+              <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
+                👁️ 特别关注速览
               </div>
-            </div>
-          </section>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 leading-relaxed">
+                <div className="prose prose-invert max-w-none text-white/70 prose-p:my-0">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{watchSection}</ReactMarkdown>
+                </div>
+              </div>
+            </section>
+          )}
 
           <section>
             <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
