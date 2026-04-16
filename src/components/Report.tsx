@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -22,14 +22,14 @@ function parseReport(text: string): ParsedReport | null {
 
   let headerTitle: string | undefined;
   let headerSub: string | undefined;
-  if (firstNonEmpty.includes("PH") || firstNonEmpty.includes("雷达")) {
+  if (firstNonEmpty.includes("PH") || firstNonEmpty.includes("\u96f7\u8fbe")) {
     headerTitle = firstNonEmpty;
     const sub = lines.slice(lines.indexOf(firstNonEmpty) + 1).find((l) => l.trim());
-    if (sub && !sub.includes("━━━")) headerSub = sub.trim();
+    if (sub && !sub.includes("\u2501\u2501\u2501")) headerSub = sub.trim();
   }
 
   const sections: Record<string, string> = {};
-  const re = /━━━\s*([^━\n]+?)\s*━━━/g;
+  const re = /\u2501\u2501\u2501\s*([^\u2501\n]+?)\s*\u2501\u2501\u2501/g;
   const matches = Array.from(cleaned.matchAll(re));
   if (matches.length === 0) return null;
 
@@ -68,10 +68,8 @@ function extractProducts(block: string): ProductItem[] {
     const l = lines[i].trim();
     if (!l.startsWith("- ")) continue;
     const raw = l.replace(/^[-*]\s+/, "").trim();
-    // Parse: **名称** ｜ 🏷️ [tag] ｜ [link] or **名称** ｜ [link]
-    // Remove markdown bold
     const deBolded = raw.replace(/\*\*/g, "");
-    const parts = deBolded.split(/[｜|]/).map((s) => s.trim());
+    const parts = deBolded.split(/[\uff5c|]/).map((s) => s.trim());
     const name = parts[0] ?? deBolded;
     let tag: string | undefined;
     let link: string | undefined;
@@ -79,8 +77,8 @@ function extractProducts(block: string): ProductItem[] {
       const mdLink = part.match(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/);
       if (mdLink) { link = mdLink[2]; continue; }
       if (part.startsWith("http")) { link = part; continue; }
-      if (part === "(无链接)" || part === "无链接") continue;
-      if (part && !tag) tag = part.replace(/^🏷️\s*/, "").replace(/^\[|\]$/g, "").trim();
+      if (part === "(\u65e0\u94fe\u63a5)" || part === "\u65e0\u94fe\u63a5") continue;
+      if (part && !tag) tag = part.replace(/^\ud83c\udff7\ufe0f\s*/, "").replace(/^\[|\]$/g, "").trim();
     }
     const line2 = lines[i + 1]?.trim();
     const line3 = lines[i + 2]?.trim();
@@ -105,34 +103,34 @@ export default function Report({ analysis }: ReportProps) {
   }
 
   const keySection = Object.entries(parsed.sections).find(([k]) =>
-    k.includes("关键发现")
+    k.includes("\u5173\u952e\u53d1\u73b0")
   )?.[1] ?? "";
   const productsSection = Object.entries(parsed.sections).find(([k]) =>
-    k.includes("重点新品")
+    k.includes("\u91cd\u70b9\u65b0\u54c1")
   )?.[1] ?? "";
   const bigCoSection = Object.entries(parsed.sections).find(([k]) =>
-    k.includes("大厂动态")
+    k.includes("\u5927\u5382\u52a8\u6001")
   )?.[1] ?? "";
   const watchSection = Object.entries(parsed.sections).find(([k]) =>
-    k.includes("特别关注")
+    k.includes("\u7279\u522b\u5173\u6ce8")
   )?.[1] ?? "";
   const ideasSection = Object.entries(parsed.sections).find(([k]) =>
-    k.includes("随手记")
+    k.includes("\u968f\u624b\u8bb0")
   )?.[1] ?? "";
 
   const findings = extractBullets(keySection).slice(0, 6);
   const productItems = extractProducts(productsSection);
   const ideas = extractBullets(ideasSection).slice(0, 12);
 
-  const bigCoEmpty = !bigCoSection || /无重大|无相关|暂无/.test(bigCoSection);
-  const watchEmpty = !watchSection || /无相关|暂无|未出现|建议手动/.test(watchSection);
+  const bigCoEmpty = !bigCoSection || /\u65e0\u91cd\u5927|\u65e0\u76f8\u5173|\u6682\u65e0/.test(bigCoSection);
+  const watchEmpty = !watchSection || /\u65e0\u76f8\u5173|\u6682\u65e0|\u672a\u51fa\u73b0|\u5efa\u8bae\u624b\u52a8/.test(watchSection);
 
   return (
     <div className="mt-8 w-full max-w-4xl">
       <div className="rounded-3xl border border-white/10 bg-[rgba(10,10,10,0.55)] p-6 backdrop-blur-md shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_60px_rgba(0,0,0,0.55)]">
         <div className="text-center">
           <div className="inline-flex items-center gap-2">
-            <span className="text-xl">🌙</span>
+            <span className="text-xl"></span>
             <h2 className="text-[18px] font-semibold tracking-tight text-white/90">
               PH Radar
             </h2>
@@ -148,7 +146,7 @@ export default function Report({ analysis }: ReportProps) {
         <div className="mt-6 grid gap-5">
           <section>
             <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
-              💡 本周关键发现
+               本周关键发现
             </div>
             <div className="grid gap-2">
               {findings.length > 0 ? (
@@ -172,7 +170,7 @@ export default function Report({ analysis }: ReportProps) {
 
           <section>
             <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
-              🆕 重点新品
+               重点新品
             </div>
             <div className="grid gap-3">
               {productItems.length > 0 ? (
@@ -182,7 +180,8 @@ export default function Report({ analysis }: ReportProps) {
                     className="relative rounded-2xl border border-white/10 bg-white/[0.03] p-4"
                   >
                     {p.tag && (
-                      <span className="absolute top-3 right-3 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide"
+                      <span
+                        className="absolute top-3 right-3 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide"
                         style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.1)" }}
                       >
                         {p.tag}
@@ -210,8 +209,8 @@ export default function Report({ analysis }: ReportProps) {
                       </div>
                     )}
                     {p.line4 && (
-                      <div className="mt-1.5 text-sm text-[rgba(200,149,108,0.9)] leading-relaxed">
-                        <div className="prose prose-invert max-w-none prose-p:my-0" style={{color:"rgba(200,149,108,0.9)"}}>
+                      <div className="mt-1.5 text-sm leading-relaxed" style={{ color: "rgba(200,149,108,0.9)" }}>
+                        <div className="prose prose-invert max-w-none prose-p:my-0" style={{ color: "rgba(200,149,108,0.9)" }}>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.line4}</ReactMarkdown>
                         </div>
                       </div>
@@ -229,7 +228,7 @@ export default function Report({ analysis }: ReportProps) {
           {!bigCoEmpty && (
             <section>
               <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
-                � 大厂动态
+                大厂动态
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 leading-relaxed">
                 <div className="prose prose-invert max-w-none text-white/70 prose-p:my-0">
@@ -242,7 +241,7 @@ export default function Report({ analysis }: ReportProps) {
           {!watchEmpty && (
             <section>
               <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
-                👁️ 特别关注速览
+                特别关注速览
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/70 leading-relaxed">
                 <div className="prose prose-invert max-w-none text-white/70 prose-p:my-0">
@@ -254,7 +253,7 @@ export default function Report({ analysis }: ReportProps) {
 
           <section>
             <div className="mb-3 text-xs font-semibold tracking-wider text-white/45">
-              💎 随手记灵感
+              随手记灵感
             </div>
             <div className="flex flex-wrap gap-2">
               {ideas.length > 0 ? (
