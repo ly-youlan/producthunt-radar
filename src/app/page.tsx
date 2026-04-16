@@ -77,6 +77,44 @@ export default function Home() {
     setActiveProduct(null);
   };
 
+  const downloadReport = () => {
+    if (!analysis) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const productName = activeProduct?.name ?? "report";
+    const lines = analysis.split("\n");
+    const htmlLines = lines.map((line) => {
+      line = line
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+      if (line.startsWith("━")) return `<hr class="sep"><h3>${line.replace(/━+/g, "").trim()}</h3>`;
+      if (line.startsWith("- ")) return `<li>${line.slice(2)}</li>`;
+      if (line.trim() === "") return "<br>";
+      return `<p>${line}</p>`;
+    });
+    const html = `<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><title>PH Radar · ${productName} · ${today}</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d0d0f;color:#e8e8e8;max-width:780px;margin:40px auto;padding:32px;line-height:1.7;}
+  h3{color:#aac4f7;font-size:13px;letter-spacing:.12em;text-transform:uppercase;margin:24px 0 10px;}
+  hr.sep{border:none;border-top:1px solid rgba(255,255,255,0.08);margin:20px 0 0;}
+  p{margin:4px 0;font-size:15px;color:rgba(255,255,255,0.82);}
+  li{margin:6px 0 6px 20px;font-size:14px;color:rgba(255,255,255,0.75);}
+  a{color:#7cb0fd;}
+  strong{color:#fff;}
+  br{display:block;height:4px;}
+</style></head>
+<body>${htmlLines.join("\n")}</body></html>`;
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ph-radar-${productName.toLowerCase()}-${today}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <ShaderBackground active={phase === "loading"}>
       <main className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6 py-14">
@@ -261,16 +299,31 @@ export default function Home() {
                   )}
                   <span className="text-white/25 text-xs">· 行业雷达报告</span>
                 </div>
-                <button
-                  onClick={reset}
-                  className="rounded-full px-4 py-1.5 text-xs text-white/50 hover:text-white/75 transition-colors"
-                  style={{
-                    background: "rgba(255,255,255,0.05)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  ← 返回
-                </button>
+                <div className="flex items-center gap-2">
+                  {!error && analysis && (
+                    <button
+                      onClick={downloadReport}
+                      className="rounded-full px-4 py-1.5 text-xs transition-colors"
+                      style={{
+                        background: activeProduct ? activeProduct.accentColor : "rgba(255,255,255,0.06)",
+                        border: `1px solid ${activeProduct ? activeProduct.borderColor : "rgba(255,255,255,0.1)"}`,
+                        color: activeProduct ? activeProduct.tagColor : "rgba(255,255,255,0.6)",
+                      }}
+                    >
+                      ↓ 下载报告
+                    </button>
+                  )}
+                  <button
+                    onClick={reset}
+                    className="rounded-full px-4 py-1.5 text-xs text-white/50 hover:text-white/75 transition-colors"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    ← 返回
+                  </button>
+                </div>
               </div>
 
               {error ? (
